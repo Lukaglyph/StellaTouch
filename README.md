@@ -53,7 +53,8 @@ CSS3: レスポンスデザインとブラー（ぼかし）エフェクトのUI
 
 📂 インストール / セットアップ
 特別な環境構築は不要です。
-
+ https://lukaglyph.github.io/StellaTouch/
+をブラウザで開くだけで動作します
 
 Bash
 git clone https://github.com/Lukaglyph/StellaTouch.git

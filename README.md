@@ -60,6 +60,6 @@ CSS3: レスポンスデザインとブラー（ぼかし）エフェクトのUI
 Bash
 git clone https://github.com/Lukaglyph/StellaTouch.git
 cd StellaTouch
-# index.htmlをブラウザで開くだけで動作します
+index.htmlをブラウザで開くだけで動作します
 📝 ライセンス
 このプロジェクトは MIT License の下で公開されています。

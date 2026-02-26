@@ -13,35 +13,42 @@
         canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
         #interaction-layer { pointer-events: auto !important; z-index: 100; cursor: crosshair; }
 
-        /* メインツールバー（下部） */
+        /* 下部ツールバー */
         #bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: var(--panel); display: flex; align-items: center; justify-content: space-around; padding: 0 10px; z-index: 1000; border-top: 1px solid #333; }
         .m-btn { width: 55px; height: 55px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 20px; border-radius: 12px; border: none; background: transparent; color: white; cursor: pointer; }
         .m-btn.active { background: var(--accent); }
         .m-btn span { font-size: 9px; margin-top: 4px; }
 
-        /* 上部ズーム・サブツール */
+        /* 上部バー */
         #top-bar { position: fixed; top: 15px; left: 15px; right: 15px; display: flex; justify-content: space-between; z-index: 1000; pointer-events: none; }
         .btn-group { display: flex; gap: 8px; pointer-events: auto; }
-        .circle-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--panel); border: 1px solid #444; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .circle-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--panel); border: 1px solid #444; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 
-        /* サイドパネル */
-        #side-panel { position: fixed; top: 0; right: -300px; bottom: 75px; width: 280px; background: var(--panel); transition: 0.3s; z-index: 1001; padding: 20px; border-radius: 20px 0 0 20px; border-left: 1px solid #444; overflow-y: auto; }
+        /* サイドパネル（レイヤー管理） */
+        #side-panel { position: fixed; top: 0; right: -320px; bottom: 75px; width: 300px; background: var(--panel); transition: 0.3s; z-index: 1001; padding: 15px; border-radius: 20px 0 0 20px; border-left: 1px solid #444; overflow-y: auto; }
         #side-panel.open { right: 0; }
         
-        #zoom-badge { position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); padding: 4px 12px; border-radius: 15px; font-size: 12px; color: white; pointer-events: none; z-index: 1000; }
+        .layer-item { background: #2a2a2a; padding: 12px; border-radius: 10px; margin-bottom: 10px; border: 2px solid transparent; }
+        .layer-item.active { border-color: var(--accent); background: #333; }
+        .layer-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .layer-name { flex-grow: 1; font-size: 14px; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .layer-controls { display: flex; gap: 4px; }
+        .l-btn { background: #444; border: none; color: white; padding: 5px; border-radius: 4px; font-size: 12px; cursor: pointer; width: 28px; }
+        .l-btn:active { background: var(--accent); }
+        
+        .opacity-box { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #aaa; }
+        .opacity-slider { flex-grow: 1; height: 4px; accent-color: var(--accent); }
 
-        #setup-screen { position: fixed; inset: 0; background: #111; z-index: 3000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .setup-box { background:#222; padding:30px; border-radius:20px; text-align:center; }
+        #setup-screen { position: fixed; inset: 0; background: #111; z-index: 3000; display: flex; align-items: center; justify-content: center; }
     </style>
 </head>
 <body>
 
 <div id="setup-screen">
-    <div class="setup-box">
+    <div style="background:#222; padding:30px; border-radius:20px; text-align:center;">
         <h2 style="color:var(--accent)">StellaTouch</h2>
-        <p>キャンバスサイズ</p>
-        <input type="number" id="inputW" value="1200" style="width:70px; padding:8px;"> × 
-        <input type="number" id="inputH" value="1600" style="width:70px; padding:8px;">
+        <input type="number" id="inputW" value="1000" style="width:70px; padding:8px;"> × 
+        <input type="number" id="inputH" value="1200" style="width:70px; padding:8px;">
         <br><br>
         <button onclick="initApp()" style="width:100%; padding:15px; background:var(--accent); color:white; border:none; border-radius:10px; font-weight:bold;">白紙を作成</button>
     </div>
@@ -53,8 +60,6 @@
     </div>
 </div>
 
-<div id="zoom-badge">Zoom: 100%</div>
-
 <div id="top-bar">
     <div class="btn-group">
         <button class="circle-btn" onclick="undo()">↩️</button>
@@ -63,7 +68,7 @@
     <div class="btn-group">
         <button class="circle-btn" onclick="changeZoom(1.2)">🔍+</button>
         <button class="circle-btn" onclick="changeZoom(0.8)">🔍-</button>
-        <button class="circle-btn" onclick="resetZoom()" title="全体表示">回</button>
+        <button class="circle-btn" onclick="resetZoom()">回</button>
         <button class="circle-btn" onclick="saveImage()">💾</button>
     </div>
 </div>
@@ -77,17 +82,16 @@
 </div>
 
 <div id="side-panel">
-    <h3>設定・レイヤー</h3>
-    <div style="font-size:12px;">ブラシサイズ</div>
-    <input type="range" id="size" min="1" max="200" value="20" style="width:100%;">
-    <div style="font-size:12px; margin-top:15px;">カラー</div>
-    <input type="color" id="picker" value="#007bff" style="width:100%; height:44px; border:none; background:none;">
-    <hr style="margin:20px 0; border:0; border-top:1px solid #444;">
-    <h4>レイヤー</h4>
+    <h3>レイヤー管理</h3>
     <div id="layerList"></div>
-    <button onclick="addLayer()" style="width:100%; padding:10px; background:var(--accent); border:none; color:white; border-radius:8px;">+ レイヤー追加</button>
+    <button onclick="addLayer()" style="width:100%; padding:12px; background:var(--accent); color:white; border:none; border-radius:8px; margin-top:10px; cursor:pointer;">+ 新規レイヤー</button>
+    
+    <hr style="margin:20px 0; border:0; border-top:1px solid #444;">
+    <div style="font-size:12px; margin-bottom:5px;">ブラシサイズ / 色</div>
+    <input type="range" id="size" min="1" max="200" value="20" style="width:100%; margin-bottom:10px;">
+    <input type="color" id="picker" value="#007bff" style="width:100%; height:44px; border:none; background:none;">
     <br><br>
-    <button onclick="togglePanel()" style="width:100%; padding:10px; background:#444; border:none; color:white; border-radius:8px;">パネルを閉じる</button>
+    <button onclick="togglePanel()" style="width:100%; padding:10px; background:#444; border:none; color:white; border-radius:8px;">閉じる</button>
 </div>
 
 <script>
@@ -100,39 +104,17 @@
     const inter = document.getElementById('interaction-layer');
 
     function initApp() {
-        canvasW = parseInt(document.getElementById('inputW').value) || 1200;
-        canvasH = parseInt(document.getElementById('inputH').value) || 1600;
+        canvasW = parseInt(document.getElementById('inputW').value) || 1000;
+        canvasH = parseInt(document.getElementById('inputH').value) || 1200;
         document.getElementById('setup-screen').style.display = 'none';
-        
-        wrapper.style.width = canvasW + 'px';
-        wrapper.style.height = canvasH + 'px';
+        wrapper.style.width = canvasW + 'px'; wrapper.style.height = canvasH + 'px';
         inter.width = canvasW; inter.height = canvasH;
-        
         addLayer("背景", true);
         addLayer("レイヤー 1");
         resetZoom();
         setupEvents();
     }
 
-    // --- ズーム・表示管理 ---
-    function updateTransform() {
-        wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
-        document.getElementById('zoom-badge').innerText = `Zoom: ${Math.round(scale * 100)}%`;
-    }
-
-    function changeZoom(factor) {
-        scale = Math.min(Math.max(scale * factor, 0.1), 10);
-        updateTransform();
-    }
-
-    function resetZoom() {
-        const v = document.getElementById('viewport');
-        scale = Math.min(v.clientWidth / canvasW, v.clientHeight / canvasH) * 0.9;
-        offsetX = 0; offsetY = 0;
-        updateTransform();
-    }
-
-    // --- イベント ---
     function setupEvents() {
         // マウスホイールズーム
         window.addEventListener('wheel', e => {
@@ -142,10 +124,9 @@
             }
         }, {passive: false});
 
-        // 共通ポインターイベント
+        // 共通ポインターイベント（PC/スマホ）
         inter.addEventListener('pointerdown', e => {
             if(currentTool === 'pan' || e.button === 1) { panning = true; return; }
-            
             drawing = true;
             const pos = getPos(e);
             if(currentTool === 'fill') { floodFill(Math.round(pos.x), Math.round(pos.y)); saveState(); drawing = false; }
@@ -156,8 +137,7 @@
         window.addEventListener('pointermove', e => {
             if(panning) {
                 offsetX += e.movementX; offsetY += e.movementY;
-                updateTransform();
-                return;
+                updateTransform(); return;
             }
             if(!drawing || curIdx === -1) return;
             const pos = getPos(e);
@@ -180,67 +160,114 @@
         return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
     }
 
-    // --- レイヤー ---
+    // --- レイヤー管理ロジック ---
     function addLayer(name = null, white = false) {
         const canvas = document.createElement('canvas');
         canvas.width = canvasW; canvas.height = canvasH;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', {willReadFrequently: true});
         if(white) { ctx.fillStyle = "white"; ctx.fillRect(0,0,canvasW,canvasH); }
-        layers.push({ canvas, ctx, name: name || `レイヤー ${layers.length+1}` });
+        layers.push({ canvas, ctx, name: name || `レイヤー ${layers.length+1}`, opacity: 1 });
         wrapper.insertBefore(canvas, inter);
         curIdx = layers.length - 1;
-        renderLayers();
+        renderLayerList();
     }
 
-    function renderLayers() {
+    function deleteLayer(idx, e) {
+        e.stopPropagation();
+        if(layers.length <= 1) return;
+        wrapper.removeChild(layers[idx].canvas);
+        layers.splice(idx, 1);
+        curIdx = Math.max(0, idx - 1);
+        renderLayerList();
+        saveState();
+    }
+
+    function moveLayer(idx, dir, e) {
+        e.stopPropagation();
+        const target = idx + dir;
+        if(target < 0 || target >= layers.length) return;
+        [layers[idx], layers[target]] = [layers[target], layers[idx]];
+        layers.forEach(l => wrapper.appendChild(l.canvas));
+        wrapper.appendChild(inter);
+        curIdx = target;
+        renderLayerList();
+    }
+
+    function updateOpacity(idx, val) {
+        layers[idx].opacity = val;
+        layers[idx].canvas.style.opacity = val;
+    }
+
+    function renameLayer(idx, e) {
+        e.stopPropagation();
+        const n = prompt("レイヤー名の変更:", layers[idx].name);
+        if(n) { layers[idx].name = n; renderLayerList(); }
+    }
+
+    function renderLayerList() {
         const list = document.getElementById('layerList');
         list.innerHTML = '';
         layers.forEach((l, i) => {
             const d = document.createElement('div');
-            d.style.padding = '12px'; d.style.margin = '4px 0'; d.style.borderRadius = '8px';
-            d.style.background = i === curIdx ? '#444' : '#2a2a2a';
-            d.style.border = i === curIdx ? '1px solid var(--accent)' : 'none';
-            d.innerText = l.name;
-            d.onclick = () => { curIdx = i; renderLayers(); };
+            d.className = `layer-item ${i === curIdx ? 'active' : ''}`;
+            d.onclick = () => { curIdx = i; renderLayerList(); };
+            d.innerHTML = `
+                <div class="layer-row">
+                    <span class="layer-name" onclick="renameLayer(${i}, event)">${l.name}</span>
+                    <div class="layer-controls">
+                        <button class="l-btn" onclick="moveLayer(${i}, 1, event)">▲</button>
+                        <button class="l-btn" onclick="moveLayer(${i}, -1, event)">▼</button>
+                        <button class="l-btn" style="color:#ff4444" onclick="deleteLayer(${i}, event)">🗑️</button>
+                    </div>
+                </div>
+                <div class="opacity-box">
+                    <span>透明度</span>
+                    <input type="range" class="opacity-slider" min="0" max="1" step="0.01" value="${l.opacity}" 
+                           oninput="updateOpacity(${i}, this.value)" onclick="event.stopPropagation()">
+                </div>
+            `;
             list.prepend(d);
         });
     }
 
-    // --- ツール ---
+    // --- 表示・履歴・ツール ---
+    function updateTransform() { wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`; }
+    function changeZoom(f) { scale = Math.min(Math.max(scale * f, 0.1), 10); updateTransform(); }
+    function resetZoom() {
+        const v = document.getElementById('viewport');
+        scale = Math.min(v.clientWidth / canvasW, v.clientHeight / canvasH) * 0.85;
+        offsetX = 0; offsetY = 0; updateTransform();
+    }
+
     function setTool(t) {
         currentTool = t;
         document.querySelectorAll('.m-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(`btn-${t}`).classList.add('active');
-        inter.style.cursor = t === 'pan' ? 'grab' : 'crosshair';
     }
 
     function togglePanel() { document.getElementById('side-panel').classList.toggle('open'); }
 
+    function saveState() {
+        undoStack.push(layers.map(l => ({ img: l.canvas.toDataURL(), name: l.name, op: l.opacity })));
+        if(undoStack.length > 30) undoStack.shift();
+        redoStack = [];
+    }
+
     function undo() {
         if(undoStack.length <= 1) return;
         redoStack.push(undoStack.pop());
-        applyState(undoStack[undoStack.length - 1]);
-    }
-
-    function redo() {
-        if(redoStack.length === 0) return;
-        const s = redoStack.pop();
-        undoStack.push(s);
-        applyState(s);
-    }
-
-    function applyState(state) {
-        state.forEach((s, i) => {
+        const s = undoStack[undoStack.length - 1];
+        s.forEach((data, i) => {
             const img = new Image();
-            img.onload = () => { layers[i].ctx.clearRect(0,0,canvasW,canvasH); layers[i].ctx.drawImage(img,0,0); };
-            img.src = s;
+            img.onload = () => {
+                layers[i].ctx.clearRect(0,0,canvasW,canvasH);
+                layers[i].ctx.drawImage(img,0,0);
+                layers[i].name = data.name;
+                updateOpacity(i, data.op);
+                renderLayerList();
+            };
+            img.src = data.img;
         });
-    }
-
-    function saveState() {
-        undoStack.push(layers.map(l => l.canvas.toDataURL()));
-        if(undoStack.length > 30) undoStack.shift();
-        redoStack = [];
     }
 
     function floodFill(startX, startY) {
@@ -267,8 +294,8 @@
     function saveImage() {
         const out = document.createElement('canvas'); out.width = canvasW; out.height = canvasH;
         const octx = out.getContext('2d');
-        layers.forEach(l => octx.drawImage(l.canvas, 0, 0));
-        const a = document.createElement('a'); a.download = 'stella_art.png'; a.href = out.toDataURL(); a.click();
+        layers.forEach(l => { octx.globalAlpha = l.opacity; octx.drawImage(l.canvas, 0, 0); });
+        const a = document.createElement('a'); a.download = 'art.png'; a.href = out.toDataURL(); a.click();
     }
 </script>
 </body>

@@ -9,7 +9,8 @@
         body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font-family: sans-serif; touch-action: none; user-select: none; }
         
         #viewport { position: fixed; inset: 0; overflow: hidden; background: #222; display: flex; align-items: center; justify-content: center; }
-        #canvas-wrapper { position: relative; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.5); transform-origin: center; }
+        /* 背景が白でも透過チェックができるように、ここでもチェック模様をうっすら表示 */
+        #canvas-wrapper { position: relative; background-image: linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; box-shadow: 0 0 20px rgba(0,0,0,0.5); transform-origin: center; }
         canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
         #interaction-layer { pointer-events: auto !important; z-index: 100; cursor: crosshair; }
 
@@ -69,7 +70,7 @@
         <button class="circle-btn" onclick="changeZoom(1.2)">🔍+</button>
         <button class="circle-btn" onclick="changeZoom(0.8)">🔍-</button>
         <button class="circle-btn" onclick="document.getElementById('imgIn').click()">🖼️</button>
-        <button class="circle-btn" onclick="saveImage()">💾</button>
+        <button class="circle-btn" onclick="saveImage()" title="透明な背景でPNG保存">💾</button>
         <input type="file" id="imgIn" hidden accept="image/*" onchange="handleImport(this)">
     </div>
 </div>
@@ -89,7 +90,14 @@
     <hr style="margin:20px 0; border-top:1px solid #444;">
     <div style="font-size:12px;">ブラシサイズ: <span id="size-val">20</span></div>
     <input type="range" id="size" min="1" max="200" value="20" oninput="document.getElementById('size-val').innerText=this.value" style="width:100%;">
-    <input type="color" id="picker" value="#007bff" style="width:100%; height:44px; margin-top:10px;">
+    
+    <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
+        <input type="color" id="picker" value="#007bff" style="flex-grow:1; height:44px; border:none; cursor:pointer;">
+        <label style="font-size:12px; display:flex; align-items:center; gap:5px; white-space:nowrap;">
+            <input type="checkbox" id="transparent-paint" onchange="toggleTransparentPaint()"> 透明色
+        </label>
+    </div>
+    
     <button onclick="togglePanel()" style="width:100%; margin-top:20px; padding:10px;">閉じる</button>
 </div>
 
@@ -99,10 +107,11 @@
     let drawing = false, panning = false, currentTool = 'brush';
     let lastX, lastY, undoStack = [], redoStack = [];
     let isSpaceDown = false;
-    let isFlipped = false; // 左右反転状態
-    let stabilizerAmount = 0.5; // 手ブレ補正の強さ (0〜1)
-    let lastPoints = []; // 手ブレ補正用の座標履歴
-    let longPressTimer; // スポイト用のタイマー
+    let isFlipped = false;
+    let stabilizerAmount = 0.5;
+    let lastPoints = [];
+    let longPressTimer;
+    let isTransparentPaint = false; // 透明色描画フラグ
 
     const wrapper = document.getElementById('canvas-wrapper');
     const inter = document.getElementById('interaction-layer');
@@ -113,15 +122,21 @@
         document.getElementById('setup-screen').style.display = 'none';
         wrapper.style.width = canvasW + 'px'; wrapper.style.height = canvasH + 'px';
         inter.width = canvasW; inter.height = canvasH;
-        addLayer("背景", true);
-        addLayer("レイヤー 1");
+        
+        // 背景レイヤーを白紙（白色で塗りつぶし）にする
+        addLayer("背景", true); 
+        addLayer("レイヤー 1", false);
+        
         saveState();
         resetZoom();
         setupEvents();
     }
 
+    function toggleTransparentPaint() {
+        isTransparentPaint = document.getElementById('transparent-paint').checked;
+    }
+
     function setupEvents() {
-        // キーボードショートカット
         window.addEventListener('keydown', e => {
             if(e.code === 'Space') { isSpaceDown = true; inter.style.cursor = 'grab'; }
             if(e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
@@ -130,48 +145,38 @@
             if(e.key === 'e') setTool('eraser');
             if(e.key === 'g') setTool('fill');
             if(e.key === 'h') setTool('pan');
-            if(e.key === '[') updateSize(-5);
-            if(e.key === ']') updateSize(5);
         });
         window.addEventListener('keyup', e => { if(e.code === 'Space') { isSpaceDown = false; inter.style.cursor = 'crosshair'; } });
-
         window.addEventListener('wheel', e => { if(e.ctrlKey || e.target.closest('#viewport')) { e.preventDefault(); changeZoom(e.deltaY > 0 ? 0.9 : 1.1); } }, {passive: false});
         
-        // ポインターイベント (筆圧対応)
-        // --- setupEvents内の pointerdown を書き換え ---
-inter.addEventListener('pointerdown', e => {
-    if(isSpaceDown || currentTool === 'pan' || e.button === 1) { panning = true; return; }
-    
-    // スポイト用の長押しタイマー開始 (500ms)
-    const pos = getPos(e);
-    longPressTimer = setTimeout(() => {
-        if (!panning && drawing) {
-            pickColor(Math.round(pos.x), Math.round(pos.y));
-            drawing = false; // 描画をキャンセルしてスポイトモードへ
-            inter.releasePointerCapture(e.pointerId);
-        }
-    }, 500);
+        inter.addEventListener('pointerdown', e => {
+            if(isSpaceDown || currentTool === 'pan' || e.button === 1) { panning = true; return; }
+            
+            const pos = getPos(e);
+            longPressTimer = setTimeout(() => {
+                if (!panning && drawing) {
+                    pickColor(Math.round(pos.x), Math.round(pos.y));
+                    drawing = false;
+                    inter.releasePointerCapture(e.pointerId);
+                }
+            }, 500);
 
-    drawing = true;
-    lastPoints = []; // 手ブレ補正履歴リセット
-    const sPos = getStabilizedPos(pos);
-    if(currentTool === 'fill') { floodFill(Math.round(sPos.x), Math.round(sPos.y)); saveState(); drawing = false; }
-    lastX = sPos.x; lastY = sPos.y;
-    inter.setPointerCapture(e.pointerId);
-});
+            drawing = true;
+            lastPoints = [];
+            const sPos = getStabilizedPos(pos);
+            if(currentTool === 'fill') { floodFill(Math.round(sPos.x), Math.round(sPos.y)); saveState(); drawing = false; }
+            lastX = sPos.x; lastY = sPos.y;
+            inter.setPointerCapture(e.pointerId);
+        });
 
-// --- setupEvents内の pointermove を書き換え ---
         window.addEventListener('pointermove', e => {
             if(panning) { offsetX += e.movementX; offsetY += e.movementY; updateTransform(); return; }
             if(!drawing || curIdx === -1) return;
 
-    // 動いたら長押しスポイトをキャンセル
             clearTimeout(longPressTimer);
-
             const pos = getPos(e);
-            const sPos = getStabilizedPos(pos); // 手ブレ補正を適用
+            const sPos = getStabilizedPos(pos);
             const ctx = layers[curIdx].ctx;
-    
             const pressure = e.pressure > 0 ? e.pressure : 1;
             const baseSize = document.getElementById('size').value;
     
@@ -179,7 +184,13 @@ inter.addEventListener('pointerdown', e => {
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             ctx.lineWidth = baseSize * pressure;
             ctx.strokeStyle = document.getElementById('picker').value;
-            if(currentTool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
+            
+            // 消しゴムか透明色描画の場合
+            if(currentTool === 'eraser' || isTransparentPaint) {
+                ctx.globalCompositeOperation = 'destination-out';
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+            }
     
             ctx.beginPath();
             ctx.moveTo(lastX, lastY);
@@ -189,40 +200,12 @@ inter.addEventListener('pointerdown', e => {
             lastX = sPos.x; lastY = sPos.y;
         });
 
-// --- pointerup にタイマー解除を追加 ---
         window.addEventListener('pointerup', () => { 
-            clearTimeout(longPressTimer); // スポイト解除
+            clearTimeout(longPressTimer);
             if(drawing) saveState(); 
             drawing = false; 
             panning = false; 
         });
-
-        window.addEventListener('pointermove', e => {
-            if(panning) { offsetX += e.movementX; offsetY += e.movementY; updateTransform(); return; }
-            if(!drawing || curIdx === -1) return;
-            const pos = getPos(e);
-            const ctx = layers[curIdx].ctx;
-            
-            // 筆圧の適用 (マウスなどは 0.5 固定、ペンは 0～1.0)
-            const pressure = e.pressure > 0 ? e.pressure : 1;
-            const baseSize = document.getElementById('size').value;
-            
-            ctx.save();
-            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            ctx.lineWidth = baseSize * pressure; // 筆圧で太さを変える
-            ctx.strokeStyle = document.getElementById('picker').value;
-            if(currentTool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
-            
-            ctx.beginPath();
-            ctx.moveTo(lastX, lastY);
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
-            ctx.restore();
-            
-            lastX = pos.x; lastY = pos.y;
-        });
-
-        window.addEventListener('pointerup', () => { if(drawing) saveState(); drawing = false; panning = false; });
     }
 
     function getPos(e) {
@@ -230,18 +213,13 @@ inter.addEventListener('pointerdown', e => {
         return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
     }
 
-    function updateSize(delta) {
-        const input = document.getElementById('size');
-        input.value = Math.max(1, Math.min(200, parseInt(input.value) + delta));
-        document.getElementById('size-val').innerText = input.value;
-    }
-
     function addLayer(name = null, white = false) {
         const canvas = document.createElement('canvas');
         canvas.width = canvasW; canvas.height = canvasH;
         const ctx = canvas.getContext('2d', {willReadFrequently: true});
         if(white) { ctx.fillStyle = "white"; ctx.fillRect(0,0,canvasW,canvasH); }
-        layers.push({ canvas, ctx, name: name || `レイヤー ${layers.length+1}`, opacity: 1, blend: 'normal' });
+        // filterプロパティを追加
+        layers.push({ canvas, ctx, name: name || `レイヤー ${layers.length+1}`, opacity: 1, blend: 'normal', filter: 'none' });
         wrapper.insertBefore(canvas, inter);
         curIdx = layers.length - 1;
         renderLayerList();
@@ -249,6 +227,11 @@ inter.addEventListener('pointerdown', e => {
 
     function updateBlend(idx, mode) { layers[idx].blend = mode; layers[idx].canvas.style.mixBlendMode = mode; }
     function updateOpacity(idx, val) { layers[idx].opacity = val; layers[idx].canvas.style.opacity = val; }
+    // フィルター更新関数
+    function updateLayerFilter(idx, filterMode) {
+        layers[idx].filter = filterMode;
+        layers[idx].canvas.style.filter = filterMode;
+    }
     
     function moveLayer(idx, dir, e) {
         e.stopPropagation();
@@ -283,12 +266,20 @@ inter.addEventListener('pointerdown', e => {
                 <div class="layer-controls"><button class="l-btn" onclick="moveLayer(${i}, 1, event)">▲</button>
                 <button class="l-btn" onclick="moveLayer(${i}, -1, event)">▼</button>
                 <button class="l-btn" onclick="deleteLayer(${i}, event)">🗑️</button></div></div>
-                <div class="layer-settings"><select class="select-style" onchange="updateBlend(${i}, this.value)" onclick="event.stopPropagation()">
-                <option value="normal" ${l.blend==='normal'?'selected':''}>通常</option>
-                <option value="multiply" ${l.blend==='multiply'?'selected':''}>乗算</option>
-                <option value="screen" ${l.blend==='screen'?'selected':''}>スクリーン</option>
-                <option value="overlay" ${l.blend==='overlay'?'selected':''}>オーバーレイ</option></select>
-                <div class="opacity-box"><input type="range" class="opacity-slider" min="0" max="1" step="0.01" value="${l.opacity}" oninput="updateOpacity(${i}, this.value)" onclick="event.stopPropagation()"></div></div>`;
+                <div class="layer-settings">
+                    <select class="select-style" onchange="updateBlend(${i}, this.value)" onclick="event.stopPropagation()">
+                        <option value="normal" ${l.blend==='normal'?'selected':''}>通常</option>
+                        <option value="multiply" ${l.blend==='multiply'?'selected':''}>乗算</option>
+                        <option value="screen" ${l.blend==='screen'?'selected':''}>スクリーン</option>
+                        <option value="overlay" ${l.blend==='overlay'?'selected':''}>オーバーレイ</option>
+                    </select>
+                    <select class="select-style" onchange="updateLayerFilter(${i}, this.value)" onclick="event.stopPropagation()">
+                        <option value="none" ${l.filter==='none'?'selected':''}>なし</option>
+                        <option value="grayscale(100%)" ${l.filter==='grayscale(100%)'?'selected':''}>グレー</option>
+                        <option value="grayscale(100%) contrast(150%)" ${l.filter==='grayscale(100%) contrast(150%)'?'selected':''}>モノクロ</option>
+                    </select>
+                    <div class="opacity-box"><input type="range" class="opacity-slider" min="0" max="1" step="0.01" value="${l.opacity}" oninput="updateOpacity(${i}, this.value)" onclick="event.stopPropagation()"></div>
+                </div>`;
             list.prepend(d);
         });
     }
@@ -297,11 +288,11 @@ inter.addEventListener('pointerdown', e => {
     function setTool(t) { currentTool = t; document.querySelectorAll('.m-btn').forEach(b => b.classList.remove('active')); document.getElementById(`btn-${t}`).classList.add('active'); }
     function togglePanel() { document.getElementById('side-panel').classList.toggle('open'); }
     function changeZoom(f) { scale = Math.min(Math.max(scale * f, 0.1), 10); updateTransform(); }
-    function updateTransform() { wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`; }
+    function updateTransform() { wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${isFlipped ? -scale : scale}, ${scale})`; }
     function resetZoom() { const v = document.getElementById('viewport'); scale = Math.min(v.clientWidth / canvasW, v.clientHeight / canvasH) * 0.85; offsetX = 0; offsetY = 0; updateTransform(); }
 
     function saveState() {
-        undoStack.push(layers.map(l => ({ img: l.canvas.toDataURL(), name: l.name, op: l.opacity, bl: l.blend })));
+        undoStack.push(layers.map(l => ({ img: l.canvas.toDataURL(), name: l.name, op: l.opacity, bl: l.blend, flt: l.filter })));
         if(undoStack.length > 50) undoStack.shift();
         redoStack = [];
     }
@@ -311,7 +302,15 @@ inter.addEventListener('pointerdown', e => {
     function applyState(state) {
         state.forEach((data, i) => {
             const img = new Image();
-            img.onload = () => { layers[i].ctx.clearRect(0,0,canvasW,canvasH); layers[i].ctx.drawImage(img,0,0); layers[i].name = data.name; updateOpacity(i, data.op); updateBlend(i, data.bl); renderLayerList(); };
+            img.onload = () => { 
+                layers[i].ctx.clearRect(0,0,canvasW,canvasH); 
+                layers[i].ctx.drawImage(img,0,0); 
+                layers[i].name = data.name; 
+                updateOpacity(i, data.op); 
+                updateBlend(i, data.bl); 
+                updateLayerFilter(i, data.flt); // フィルター復元
+                renderLayerList(); 
+            };
             img.src = data.img;
         });
     }
@@ -351,45 +350,55 @@ inter.addEventListener('pointerdown', e => {
     }
 
     function saveImage() {
-        const out = document.createElement('canvas'); out.width = canvasW; out.height = canvasH;
+        const out = document.createElement('canvas'); 
+        out.width = canvasW; 
+        out.height = canvasH;
         const octx = out.getContext('2d');
-        layers.forEach(l => { octx.save(); octx.globalAlpha = l.opacity; octx.globalCompositeOperation = l.blend === 'normal' ? 'source-over' : l.blend; octx.drawImage(l.canvas, 0, 0); octx.restore(); });
-        const a = document.createElement('a'); a.download = 'art_pro.png'; a.href = out.toDataURL(); a.click();
+        
+        // すべてのレイヤーを統合して保存
+        layers.forEach(l => { 
+            octx.save(); 
+            octx.globalAlpha = l.opacity; 
+            octx.globalCompositeOperation = l.blend === 'normal' ? 'source-over' : l.blend; 
+            octx.filter = l.filter;
+            octx.drawImage(l.canvas, 0, 0); 
+            octx.restore(); 
+        });
+        
+        // 透過PNGとしてダウンロード
+        const a = document.createElement('a'); 
+        a.download = 'art_pro.png'; 
+        a.href = out.toDataURL('image/png'); 
+        a.click();
     }
-    // --- 左右反転機能 ---
-function toggleFlip() {
-    isFlipped = !isFlipped;
-    wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${isFlipped ? -scale : scale}, ${scale})`;
-}
-
-// --- 手ブレ補正（指数平滑法） ---
-function getStabilizedPos(pos) {
-    if (lastPoints.length === 0) {
-        lastPoints.push(pos);
-        return pos;
+    
+    function toggleFlip() {
+        isFlipped = !isFlipped;
+        updateTransform();
     }
-    const last = lastPoints[lastPoints.length - 1];
-    // 新しい座標 = 前回の座標 + (今回の座標 - 前回の座標) * (1 - 補正強度)
-    const smoothed = {
-        x: last.x + (pos.x - last.x) * (1 - stabilizerAmount),
-        y: last.y + (pos.y - last.y) * (1 - stabilizerAmount)
-    };
-    lastPoints.push(smoothed);
-    if (lastPoints.length > 5) lastPoints.shift();
-    return smoothed;
-}
 
-// --- スポイト機能（特定座標の色を取得） ---
-function pickColor(x, y) {
-    // 全レイヤーを合成した色を取得するため、一時的なキャンバスを使用するか
-    // または現在のレイヤーから取得（指描きでは現在のレイヤーから取るのが一般的）
-    const ctx = layers[curIdx].ctx;
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    if (pixel[3] === 0) return; // 透明箇所は無視
-    const hex = "#" + ((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1);
-    document.getElementById('picker').value = hex;
-}
+    function getStabilizedPos(pos) {
+        if (lastPoints.length === 0) {
+            lastPoints.push(pos);
+            return pos;
+        }
+        const last = lastPoints[lastPoints.length - 1];
+        const smoothed = {
+            x: last.x + (pos.x - last.x) * (1 - stabilizerAmount),
+            y: last.y + (pos.y - last.y) * (1 - stabilizerAmount)
+        };
+        lastPoints.push(smoothed);
+        if (lastPoints.length > 5) lastPoints.shift();
+        return smoothed;
+    }
+
+    function pickColor(x, y) {
+        const ctx = layers[curIdx].ctx;
+        const pixel = ctx.getImageData(x, y, 1, 1).data;
+        if (pixel[3] === 0) return;
+        const hex = "#" + ((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1);
+        document.getElementById('picker').value = hex;
+    }
 </script>
 </body>
 </html>
-

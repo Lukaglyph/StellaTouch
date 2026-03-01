@@ -9,7 +9,6 @@
         body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font-family: sans-serif; touch-action: none; user-select: none; }
         
         #viewport { position: fixed; inset: 0; overflow: hidden; background: #222; display: flex; align-items: center; justify-content: center; }
-        /* 背景が白でも透過チェックができるように、ここでもチェック模様をうっすら表示 */
         #canvas-wrapper { position: relative; background-image: linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; box-shadow: 0 0 20px rgba(0,0,0,0.5); transform-origin: center; }
         canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
         #interaction-layer { pointer-events: auto !important; z-index: 100; cursor: crosshair; }
@@ -111,7 +110,7 @@
     let stabilizerAmount = 0.5;
     let lastPoints = [];
     let longPressTimer;
-    let isTransparentPaint = false; // 透明色描画フラグ
+    let isTransparentPaint = false;
 
     const wrapper = document.getElementById('canvas-wrapper');
     const inter = document.getElementById('interaction-layer');
@@ -123,7 +122,6 @@
         wrapper.style.width = canvasW + 'px'; wrapper.style.height = canvasH + 'px';
         inter.width = canvasW; inter.height = canvasH;
         
-        // 背景レイヤーを白紙（白色で塗りつぶし）にする
         addLayer("背景", true); 
         addLayer("レイヤー 1", false);
         
@@ -185,7 +183,6 @@
             ctx.lineWidth = baseSize * pressure;
             ctx.strokeStyle = document.getElementById('picker').value;
             
-            // 消しゴムか透明色描画の場合
             if(currentTool === 'eraser' || isTransparentPaint) {
                 ctx.globalCompositeOperation = 'destination-out';
             } else {
@@ -210,7 +207,10 @@
 
     function getPos(e) {
         const rect = wrapper.getBoundingClientRect();
-        return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
+        let x = (e.clientX - rect.left) / scale;
+        let y = (e.clientY - rect.top) / scale;
+        if (isFlipped) { x = canvasW - x; }
+        return { x: x, y: y };
     }
 
     function addLayer(name = null, white = false) {
@@ -218,7 +218,6 @@
         canvas.width = canvasW; canvas.height = canvasH;
         const ctx = canvas.getContext('2d', {willReadFrequently: true});
         if(white) { ctx.fillStyle = "white"; ctx.fillRect(0,0,canvasW,canvasH); }
-        // filterプロパティを追加
         layers.push({ canvas, ctx, name: name || `レイヤー ${layers.length+1}`, opacity: 1, blend: 'normal', filter: 'none' });
         wrapper.insertBefore(canvas, inter);
         curIdx = layers.length - 1;
@@ -227,7 +226,6 @@
 
     function updateBlend(idx, mode) { layers[idx].blend = mode; layers[idx].canvas.style.mixBlendMode = mode; }
     function updateOpacity(idx, val) { layers[idx].opacity = val; layers[idx].canvas.style.opacity = val; }
-    // フィルター更新関数
     function updateLayerFilter(idx, filterMode) {
         layers[idx].filter = filterMode;
         layers[idx].canvas.style.filter = filterMode;
@@ -288,7 +286,11 @@
     function setTool(t) { currentTool = t; document.querySelectorAll('.m-btn').forEach(b => b.classList.remove('active')); document.getElementById(`btn-${t}`).classList.add('active'); }
     function togglePanel() { document.getElementById('side-panel').classList.toggle('open'); }
     function changeZoom(f) { scale = Math.min(Math.max(scale * f, 0.1), 10); updateTransform(); }
-    function updateTransform() { wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${isFlipped ? -scale : scale}, ${scale})`; }
+    
+    function updateTransform() {
+        wrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${isFlipped ? -scale : scale}, ${scale})`;
+    }
+    
     function resetZoom() { const v = document.getElementById('viewport'); scale = Math.min(v.clientWidth / canvasW, v.clientHeight / canvasH) * 0.85; offsetX = 0; offsetY = 0; updateTransform(); }
 
     function saveState() {
@@ -308,23 +310,30 @@
                 layers[i].name = data.name; 
                 updateOpacity(i, data.op); 
                 updateBlend(i, data.bl); 
-                updateLayerFilter(i, data.flt); // フィルター復元
+                updateLayerFilter(i, data.flt);
                 renderLayerList(); 
             };
             img.src = data.img;
         });
     }
 
+    // --- 画像読み込みと操作の追加ロジック ---
     function handleImport(input) {
         const file = input.files[0]; if(!file) return;
         const reader = new FileReader();
         reader.onload = e => {
             const img = new Image();
             img.onload = () => {
+                // 画像を独立したキャンバスレイヤーとして追加
                 addLayer("インポート画像");
                 const ctx = layers[curIdx].ctx;
-                const ratio = Math.min(canvasW / img.width, canvasH / img.height);
-                ctx.drawImage(img, 0, 0, img.width * ratio, img.height * ratio);
+                
+                // キャンバスに合わせてリサイズして描画
+                const ratio = Math.min(canvasW / img.width, canvasH / img.height) * 0.5; // 最初は小さめに表示
+                const x = (canvasW - img.width * ratio) / 2;
+                const y = (canvasH - img.height * ratio) / 2;
+                ctx.drawImage(img, x, y, img.width * ratio, img.height * ratio);
+                
                 saveState();
             };
             img.src = e.target.result;
@@ -355,7 +364,6 @@
         out.height = canvasH;
         const octx = out.getContext('2d');
         
-        // すべてのレイヤーを統合して保存
         layers.forEach(l => { 
             octx.save(); 
             octx.globalAlpha = l.opacity; 
@@ -365,7 +373,6 @@
             octx.restore(); 
         });
         
-        // 透過PNGとしてダウンロード
         const a = document.createElement('a'); 
         a.download = 'art_pro.png'; 
         a.href = out.toDataURL('image/png'); 
